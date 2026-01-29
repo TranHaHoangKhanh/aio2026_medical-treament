@@ -462,14 +462,20 @@ def treatment_dataset_split(X_train, y_train, X_val, y_val):
 # ==========================================
 
 def run_analysis(file_obj):
+    empty_plots = (None, None)
+    
     if file_obj is None: 
-        return "Please upload a CSV file.", "", "", "", None, None
+        return "⚠️ Please upload a CSV file.", "", "", "", *empty_plots
 
-    # --- Load & Prep ---
     try:
-        data = pd.read_csv(file_obj.name, index_col=0)
+        data = pd.read_csv(file_obj.name, index_col=None) # Fix: No index col assumption
     except:
-        return "Error reading CSV.", "", "", "", None, None
+        return "Error reading CSV.", "", "", "", *empty_plots
+
+    # Basic Validation
+    required_cols = ['TRTMT', 'outcome']
+    if not all(col in data.columns for col in required_cols):
+         return f"Error: CSV missing columns {required_cols}", "", "", "", *empty_plots
 
     data_clean = data.dropna(axis=0)
     y = data_clean.outcome
@@ -495,21 +501,32 @@ def run_analysis(file_obj):
     lr = LogisticRegression(penalty='l2', solver='lbfgs', max_iter=10000)
     lr.fit(X_dev, y_dev)
     theta, OR = extract_treatment_effect(lr, X_dev)
-    
-    # Calc Empirical
     arr_series = lr_ARR_quantile(X_dev, y_dev, lr)
     
-    # Plot 1
+    # Plot 1 (Adapted for Dark/Light Mode)
+    # We use transparent backgrounds and explicit line colors
     fig1, ax1 = plt.subplots(figsize=(10, 6))
+    
+    # Set plot style for transparency
+    fig1.patch.set_alpha(0.0)
+    ax1.patch.set_alpha(0.0)
+    
     ps = np.arange(0.001, 0.999, 0.001)
     diffs = [OR_to_ARR(p, OR) for p in ps]
-    ax1.plot(ps, diffs, label='Theoretical (LR)', color='#2563eb', linewidth=2)
-    ax1.scatter(arr_series.index, arr_series.values, color='#dc2626', s=50, label='Empirical (Actual)', zorder=5)
+    
+    ax1.plot(ps, diffs, label='Theoretical (LR)', color='#3b82f6', linewidth=3)
+    ax1.scatter(arr_series.index, arr_series.values, color='#ef4444', s=60, label='Empirical (Actual)', zorder=5, edgecolors='white')
+    
     ax1.set_xlabel('Baseline Risk', fontsize=12)
     ax1.set_ylabel('ARR (Benefit)', fontsize=12)
     ax1.set_title('Absolute Risk Reduction', fontsize=14, fontweight='bold')
+    
+    # Grid and Spines
+    ax1.grid(True, color='gray', alpha=0.2)
+    for spine in ax1.spines.values():
+        spine.set_edgecolor('gray')
+        
     ax1.legend(fontsize=11)
-    ax1.grid(True, alpha=0.2)
     plt.tight_layout()
 
     lr_md = f"""
@@ -531,17 +548,24 @@ def run_analysis(file_obj):
     
     tl = TLearner(rf_treated, rf_control)
     tl.fit(X_dev_ml, y_dev, T_dev)
-    cate_pred = tl.predict(X_dev_ml)
+    cate_pred = tl.predict_cate(X_dev_ml)
     
     # Plot 2
     fig2, ax2 = plt.subplots(figsize=(10, 6))
-    ax2.hist(cate_pred, bins=25, color='#059669', alpha=0.7, edgecolor='white')
+    fig2.patch.set_alpha(0.0)
+    ax2.patch.set_alpha(0.0)
+    
+    ax2.hist(cate_pred, bins=25, color='#10b981', alpha=0.8, edgecolor='white')
     ax2.set_xlabel('Predicted Benefit (Risk Reduction)', fontsize=12)
     ax2.set_ylabel('Number of Patients', fontsize=12)
     ax2.set_title('Distribution of Individual Effects (CATE)', fontsize=14, fontweight='bold')
-    ax2.axvline(0, color='#dc2626', linestyle='--', linewidth=2, label='No Effect (Harm)')
+    ax2.axvline(0, color='#ef4444', linestyle='--', linewidth=2, label='No Effect (Harm)')
+    
+    ax2.grid(axis='y', color='gray', alpha=0.2)
+    for spine in ax2.spines.values():
+        spine.set_edgecolor('gray')
+        
     ax2.legend(fontsize=11)
-    ax2.grid(axis='y', alpha=0.2)
     plt.tight_layout()
 
     ml_md = f"""
@@ -569,80 +593,103 @@ def run_analysis(file_obj):
     return stats_md, lr_md, ml_md, eval_md, fig1, fig2
 
 # ==========================================
-# 3. BEAUTIFUL UI CONSTRUCTION
+# 3. BEAUTIFUL UI (DARK/LIGHT MODE COMPATIBLE)
 # ==========================================
 
-# Custom CSS for a clean, medical aesthetic
 custom_css = """
-/* Background */
+/* Background handles */
 .gradio-container {
-    background-color: #f3f4f6;
+    background-color: var(--background-fill-secondary);
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 
-/* Header */
+/* Header Box */
 .header-box {
     text-align: center;
     padding: 20px;
     margin-bottom: 20px;
-    background: white;
-    border-bottom: 4px solid #3b82f6;
+    background: var(--background-fill-primary);
+    border-bottom: 4px solid var(--color-accent);
     border-radius: 0 0 10px 10px;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    box-shadow: var(--shadow-drop);
+    border: 1px solid var(--border-color-primary);
 }
-h1 { color: #1e3a8a; font-weight: 800; font-size: 2.5em; margin: 0; }
-p { color: #6b7280; font-size: 1.1em; }
+
+h1 {
+    color: var(--color-accent);
+    font-weight: 800 !important;
+    font-size: 2.5em;
+    margin: 0;
+}
+
+p {
+    color: var(--body-text-color-subdued);
+    font-size: 1.1em;
+}
 
 /* Content Cards */
 .group-box {
-    background: white;
+    background: var(--background-fill-primary);
     padding: 25px;
     border-radius: 12px;
-    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
-    border: 1px solid #e5e7eb;
+    box-shadow: var(--shadow-drop);
+    border: 1px solid var(--border-color-primary);
 }
 
-/* Button */
+/* Run Button */
 #run-btn {
-    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+    background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-soft) 100%);
     border: none;
     color: white;
     font-weight: bold;
     font-size: 1.1em;
     transition: transform 0.1s;
 }
-#run-btn:hover { transform: scale(1.02); }
+#run-btn:hover {
+    transform: scale(1.02);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+}
 
 /* Custom Markdown Tables */
 table { width: 100%; border-collapse: collapse; }
-th { text-align: left; color: #374151; border-bottom: 2px solid #e5e7eb; padding: 8px; }
-td { border-bottom: 1px solid #e5e7eb; padding: 8px; color: #4b5563; }
+th { 
+    text-align: left; 
+    color: var(--body-text-color); 
+    border-bottom: 2px solid var(--border-color-primary); 
+    padding: 8px; 
+}
+td { 
+    border-bottom: 1px solid var(--border-color-primary); 
+    padding: 8px; 
+    color: var(--body-text-color-subdued); 
+}
 """
 
-# Theme Setup
 theme = gr.themes.Soft(
     primary_hue="blue",
     secondary_hue="slate",
     text_size="lg",
     spacing_size="md",
     radius_size="lg"
+).set(
+    body_background_fill="var(--background-fill-secondary)"
 )
 
-with gr.Blocks(theme=theme, css=custom_css, title="Medical AI Pipeline") as app:
+with gr.Blocks(theme=theme, css=custom_css, title="Medical AI Pipeline") as interface:
     
     # --- HEADER ---
     with gr.Column(elem_classes="header-box"):
         gr.Markdown("# 🏥 Medical Treatment AI")
         gr.Markdown("Personalized Treatment Effect Estimation using Logistic Regression & T-Learners")
 
-    # --- INPUT SECTION ---
+    # --- INPUT SECTION (UPDATED AS REQUESTED) ---
     with gr.Row():
-        with gr.Column(scale=2):
+        with gr.Column(scale=3):
             file_input = gr.File(
                 label="Upload Patient Data (CSV)", 
                 file_types=[".csv"],
                 file_count="single",
-                height=100
+                height=200
             )
         with gr.Column(scale=1, min_width=200):
             # Spacer to push button down slightly
@@ -684,8 +731,10 @@ with gr.Blocks(theme=theme, css=custom_css, title="Medical AI Pipeline") as app:
 
     # --- FOOTER ---
     gr.Markdown("---")
-    gr.Markdown("*Note: This tool is for educational purposes. Always consult a medical professional.*", 
-                elem_classes="text-center text-gray-500")
+    gr.Markdown(
+        "<center>Note: This tool is for educational purposes. Always consult a medical professional.</center>", 
+        elem_classes="footer-text"
+    )
 
     # --- INTERACTIONS ---
     run_btn.click(
@@ -695,4 +744,4 @@ with gr.Blocks(theme=theme, css=custom_css, title="Medical AI Pipeline") as app:
     )
 
 if __name__ == "__main__":
-    app.launch()
+    interface.launch()
